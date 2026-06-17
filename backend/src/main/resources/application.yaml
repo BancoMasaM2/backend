@@ -1,3 +1,34 @@
 spring:
   application:
-    name: backend
+    name: backend-billetera
+
+  # Configuración de la conexión a la Base de Datos
+  datasource:
+    url: jdbc:postgresql://localhost:5432/billetera_virtual
+    username: user
+    password: password
+    driver-class-name: org.postgresql.Driver
+
+  # Configuración del motor ORM (Hibernate)
+  jpa:
+    hibernate:
+      ddl-auto: update # Crea y actualiza las tablas automáticamente según los modelos Kotlin
+    show-sql: true     # Muestra las consultas SQL en la consola para depuración rápida
+    properties:
+      hibernate:
+        format_sql: true
+
+  # Configuración de la persistencia de sesiones basadas en Cookies
+  session:
+    store-type: jdbc # Almacena los Session IDs en la base de datos relacional
+    jdbc:
+      initialize-schema: always # Crea automáticamente las tablas de sesión de Spring en el arranque
+
+server:
+  port: 8080
+  servlet:
+    session:
+      timeout: 30m # Tiempo de expiración de la sesión por inactividad
+      cookie:
+        http-only: true
+        secure: false # Cambiar a true cuando se disponga de certificados HTTPS SSL
