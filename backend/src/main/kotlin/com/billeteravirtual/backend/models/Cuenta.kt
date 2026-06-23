@@ -38,7 +38,7 @@ data class Cuenta(
     @Column(name = "saldo", nullable = false, precision = 19, scale = 2)
     @NotNull
     @DecimalMin(value = "0.0", inclusive = true)
-    val saldo: BigDecimal = BigDecimal.ZERO,
+    var saldo: BigDecimal = BigDecimal.ZERO,
 
     @Column(name = "alias", nullable = false, unique = true, length = 100)
     @NotBlank

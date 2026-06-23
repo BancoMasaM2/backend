@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Iniciar Sesión — Billetera Virtual</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="page-center">
+        <div class="auth-card">
+            <div class="logo">
+                <h1>◈ Billetera</h1>
+                <p>Accedé a tu cuenta</p>
+            </div>
+
+            <div id="loginAlert"></div>
+
+            <form id="loginForm">
+                <div class="form-group">
+                    <label>Email o DNI</label>
+                    <input type="text" id="identificador" placeholder="usuario@ejemplo.com" required autofocus>
+                </div>
+                <div class="form-group">
+                    <label>Contraseña</label>
+                    <input type="password" id="password" placeholder="••••••••" required>
+                </div>
+                <button type="submit" class="btn btn-primary" id="loginBtn">
+                    <span class="spinner"></span>
+                    <span class="btn-text">Iniciar Sesión</span>
+                </button>
+            </form>
+
+            <div class="auth-links">
+                <a href="register.html">Crear una cuenta</a>
+                <br><br>
+                <a href="forgot-password.html">¿Olvidaste tu contraseña?</a>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            setLoading('loginBtn', true);
+            const { ok, data } = await apiFetch('/api/auth/login', {
+                method: 'POST',
+                body: {
+                    identificador: document.getElementById('identificador').value,
+                    password: document.getElementById('password').value,
+                },
+            });
+            setLoading('loginBtn', false);
+            if (ok) {
+                window.location.href = 'dashboard.html';
+            } else {
+                showAlert('loginAlert', 'error', data.mensaje || 'Error al iniciar sesión');
+            }
+        });
+    </script>
+</body>
+</html>

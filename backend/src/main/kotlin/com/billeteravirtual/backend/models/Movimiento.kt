@@ -21,10 +21,9 @@ data class Movimiento(
     @Column(name = "id", nullable = false, updatable = false, columnDefinition = "UUID")
     val id: UUID = UUID.randomUUID(),
 
-    @ManyToOne(optional = false)
-    @JoinColumn(name = "cuenta_origen_id", nullable = false)
-    @NotNull
-    val cuentaOrigen: Cuenta,
+    @ManyToOne(optional = true)
+    @JoinColumn(name = "cuenta_origen_id", nullable = true)
+    val cuentaOrigen: Cuenta?,
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "cuenta_destino_id", nullable = false)
@@ -44,7 +43,7 @@ data class Movimiento(
     @Enumerated(EnumType.STRING)
     @Column(name = "estado_movimiento", nullable = false, length = 20)
     @NotNull
-    val estadoMovimiento: EstadoMovimiento = EstadoMovimiento.PENDIENTE_AUTORIZACION,
+    var estadoMovimiento: EstadoMovimiento = EstadoMovimiento.PENDIENTE_AUTORIZACION,
 
     @Column(name = "descripcion", length = 500)
     val descripcion: String? = null,
@@ -57,5 +56,5 @@ data class Movimiento(
     val fechaAutorizacion: LocalDateTime? = null,
 
     @Column(name = "codigo_autorizacion", length = 6)
-    val codigoAutorizacion: String? = null
+    var codigoAutorizacion: String? = null
 )
