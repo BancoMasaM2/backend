@@ -2,36 +2,53 @@
 
 ## Arquitectura del Sistema
 
-El sistema está compuesto por tres servicios independientes:
+El sistema está compuesto por tres servicios independientes más un frontend SPA:
 
-| Servicio | Tecnología | Puerto | Descripción |
+| Componente | Tecnología | Puerto | Descripción |
 |---|---|---|---|
-| **Backend** | Kotlin + Spring Boot | `8080` | Autenticación, gestión de usuarios y consulta de billetera |
-| **Payment Gateway** | Python + Flask | `5001` | Cotización de divisas, transferencias, envío de correos |
-| **Reverse Proxy** | Python (http.server) | `8000` | Enrutamiento de peticiones al servicio correspondiente |
+| **Backend** | Kotlin + Spring Boot 4.1 | `8080` | Autenticación, gestión de usuarios y consulta de billetera |
+| **Payment Gateway** | Python + Flask 3.1 | `5001` | Cotización de divisas (BCRA), transferencias, envío de correos SMTP |
+| **Reverse Proxy** | Python (`http.server`) | `8000` | Enrutamiento de peticiones al servicio correspondiente |
+| **Frontend** | HTML5 + CSS3 + JS vanilla | `3000` | Interfaz de usuario SPA multipágina |
+
+### Diagrama de Arquitectura
 
 ```
-Cliente → Reverse Proxy (:8000) → Backend (:8080) para /api/auth/* y /api/wallet/*
-                              → Payment Gateway (:5001) para /api/rates/* y /api/payments/*
+Cliente (Frontend :3000)
+       │
+       ▼
+Reverse Proxy (:8000)
+       │
+       ├── /api/auth/*     ──► Backend (:8080)
+       ├── /api/wallet/*   ──► Backend (:8080)
+       ├── /api/rates/*    ──► Payment Gateway (:5001)
+       └── /api/payments/* ──► Payment Gateway (:5001)
 ```
+
+### Base de Datos Compartida
+
+Tanto el Backend como el Payment Gateway acceden a la misma base de datos PostgreSQL:
+- **Backend**: mediante JPA/Hibernate (Spring Data JPA)
+- **Payment Gateway**: mediante psycopg2 (SQL directo)
 
 ---
 
-## Servicio: Backend
+## Endpoints del Backend
 
 ### A.1) Registro de Usuario
+
 `POST /api/auth/registro`
 
-Registra un nuevo usuario y crea sus cuentas (ARS y USD) automáticamente.
+Registra un nuevo usuario. Crea automáticamente dos cuentas (una en ARS y otra en USD) con alias generados a partir del nombre completo. El email queda en estado `PENDIENTE` hasta ser verificado.
 
 **Request:**
 ```json
 {
   "email": "usuario@ejemplo.com",
   "password": "PasswordSeguro123",
-  "nombre_completo": "Juan Perez",
+  "nombreCompleto": "Juan Perez",
   "dni": "12345678",
-  "fecha_nacimiento": "1990-05-15"
+  "fechaNacimiento": "1990-05-15"
 }
 ```
 
@@ -43,7 +60,7 @@ Registra un nuevo usuario y crea sus cuentas (ARS y USD) automáticamente.
 }
 ```
 
-**Response (400 Bad Request):**
+**Response (400 Bad Request) — email duplicado:**
 ```json
 {
   "mensaje": "El email ya está registrado",
@@ -51,12 +68,21 @@ Registra un nuevo usuario y crea sus cuentas (ARS y USD) automáticamente.
 }
 ```
 
+**Response (400 Bad Request) — DNI duplicado:**
+```json
+{
+  "mensaje": "El DNI ya está registrado",
+  "success": false
+}
+```
+
 ---
 
 ### A.2) Validación de Correo Electrónico
+
 `POST /api/auth/validar-email`
 
-Valida el correo electrónico con el código de 6 dígitos enviado al email.
+Valida el correo electrónico ingresando el código de 6 dígitos. El código se genera durante el registro y se almacena en `codigo_verificacion_email`. Al validar, cambia `estadoEmail` a `VERIFICADO`.
 
 **Request:**
 ```json
@@ -85,9 +111,10 @@ Valida el correo electrónico con el código de 6 dígitos enviado al email.
 ---
 
 ### A.3) Inicio de Sesión
+
 `POST /api/auth/login`
 
-Autentica al usuario mediante sesión con cookies (Spring Session JDBC). El campo `identificador` puede ser un email o un DNI. La cookie `JSESSIONID` se configura automáticamente.
+Autentica al usuario mediante sesión con cookies (Spring Session JDBC). El campo `identificador` acepta tanto email como DNI. La cookie `JSESSIONID` (httpOnly) se configura automáticamente en la respuesta. Timeout de sesión: 30 minutos.
 
 **Request:**
 ```json
@@ -105,21 +132,6 @@ Autentica al usuario mediante sesión con cookies (Spring Session JDBC). El camp
 }
 ```
 
----
-
-### A.6) Obtener Usuario Actual
-`GET /api/auth/me`
-
-Obtiene los datos del usuario autenticado (requiere sesión activa).
-
-**Response (200 OK):**
-```json
-{
-  "email": "usuario@ejemplo.com",
-  "nombreCompleto": "Juan Perez"
-}
-```
-
 **Response (401 Unauthorized):**
 ```json
 {
@@ -131,9 +143,10 @@ Obtiene los datos del usuario autenticado (requiere sesión activa).
 ---
 
 ### A.4) Olvidé mi Contraseña
+
 `POST /api/auth/olvide-password`
 
-Solicita un link de recuperación de contraseña. Se envía al correo del usuario.
+Genera un token UUID de recuperación y lo almacena en `tokenRecuperacionPass` del usuario. El frontend muestra un mensaje genérico de éxito por seguridad (no revela si el email existe o no).
 
 **Request:**
 ```json
@@ -153,9 +166,10 @@ Solicita un link de recuperación de contraseña. Se envía al correo del usuari
 ---
 
 ### A.5) Restablecer Contraseña
+
 `POST /api/auth/reset-password`
 
-Restablece la contraseña usando el token recibido por correo.
+Restablece la contraseña usando el token UUID recibido. Valida que `nuevaPassword` coincida con `confirmarPassword` y que el token exista en la base de datos.
 
 **Request:**
 ```json
@@ -174,12 +188,58 @@ Restablece la contraseña usando el token recibido por correo.
 }
 ```
 
+**Response (400 Bad Request) — contraseñas no coinciden:**
+```json
+{
+  "mensaje": "Las contraseñas no coinciden",
+  "success": false
+}
+```
+
+**Response (400 Bad Request) — token inválido:**
+```json
+{
+  "mensaje": "Token inválido o expirado",
+  "success": false
+}
+```
+
+---
+
+### A.6) Obtener Usuario Actual
+
+`GET /api/auth/me`
+
+Obtiene los datos del usuario autenticado mediante la sesión activa (requiere cookie `JSESSIONID`).
+
+**Headers:**
+```
+Cookie: JSESSIONID=<session-id>
+```
+
+**Response (200 OK):**
+```json
+{
+  "email": "usuario@ejemplo.com",
+  "nombreCompleto": "Juan Perez"
+}
+```
+
+**Response (401 Unauthorized):**
+```json
+{
+  "mensaje": "Credenciales inválidas",
+  "success": false
+}
+```
+
 ---
 
 ### B.1) Obtener Estado de la Billetera
+
 `GET /api/wallet/estado`
 
-Obtiene el saldo y alias de todas las cuentas del usuario autenticado.
+Obtiene el saldo y alias de todas las cuentas (ARS y USD) del usuario autenticado.
 
 **Headers:**
 ```
@@ -208,9 +268,10 @@ Cookie: JSESSIONID=<session-id>
 ---
 
 ### B.2) Historial de Movimientos
+
 `GET /api/wallet/movimientos`
 
-Obtiene el historial de movimientos del usuario autenticado.
+Obtiene el historial de movimientos del usuario autenticado, ordenado por fecha de creación descendente (más reciente primero). Incluye transferencias donde el usuario sea origen o destino.
 
 **Headers:**
 ```
@@ -230,18 +291,30 @@ Cookie: JSESSIONID=<session-id>
     "estado": "COMPLETADO",
     "fechaCreacion": "2024-10-25T10:00:00",
     "descripcion": "Transferencia de $5000 a maria.gomez.ars"
+  },
+  {
+    "id": "uuid",
+    "cuentaOrigenAlias": "juan.perez.usd",
+    "cuentaDestinoAlias": "pedro.lopez.usd",
+    "monto": 100.00,
+    "moneda": "USD",
+    "tipo": "TRANSFERENCIA",
+    "estado": "PENDIENTE_AUTORIZACION",
+    "fechaCreacion": "2024-10-24T15:30:00",
+    "descripcion": "Transferencia de $100 a pedro.lopez.usd"
   }
 ]
 ```
 
 ---
 
-## Servicio: Payment Gateway
+## Endpoints del Payment Gateway
 
-### C.1) Cotización del Dólar
+### C.1) Cotización del Dólar (BCRA)
+
 `GET /api/rates/usd`
 
-Obtiene la cotización oficial del dólar desde la API del BCRA.
+Obtiene la cotización oficial del dólar estadounidense desde la API de Estadísticas Cambiarias del BCRA (`https://api.bcra.gob.ar/estadisticascambiarias/v1.0/Cotizaciones`). Busca la cotización con `codigoMoneda = "USD"`.
 
 **Response (200 OK):**
 ```json
@@ -253,12 +326,28 @@ Obtiene la cotización oficial del dólar desde la API del BCRA.
 }
 ```
 
+**Response (200 OK) — error en BCRA:**
+```json
+{
+  "moneda_base": "USD",
+  "moneda_destino": "ARS",
+  "cotizacion_oficial": 0.0,
+  "fecha_actualizacion": ""
+}
+```
+
 ---
 
 ### C.2) Iniciar Transferencia
+
 `POST /api/payments/transferir/iniciar`
 
-Inicia una transferencia. Verifica fondos, crea el movimiento en estado `PENDIENTE_AUTORIZACION` y envía un código OTP de 6 dígitos al correo del remitente.
+Inicia una transferencia entre usuarios. **Fase 1 del proceso de 2 fases.**
+1. Valida que exista la cuenta origen (email + moneda) y la cuenta destino (alias)
+2. Verifica saldo suficiente
+3. Genera un código OTP de 6 dígitos
+4. Crea un movimiento en estado `PENDIENTE_AUTORIZACION`
+5. Envía el código OTP por correo electrónico al remitente vía Gmail SMTP
 
 **Request:**
 ```json
@@ -279,7 +368,7 @@ Inicia una transferencia. Verifica fondos, crea el movimiento en estado `PENDIEN
 }
 ```
 
-**Response (400 Bad Request):**
+**Response (400 Bad Request) — saldo insuficiente:**
 ```json
 {
   "mensaje": "Saldo insuficiente",
@@ -287,12 +376,41 @@ Inicia una transferencia. Verifica fondos, crea el movimiento en estado `PENDIEN
 }
 ```
 
+**Response (400 Bad Request) — alias destino no existe:**
+```json
+{
+  "mensaje": "Alias destino no encontrado",
+  "success": false
+}
+```
+
+**Email enviado al remitente:**
+```
+Asunto: Código de autorización - Transferencia Billetera Virtual
+
+Has solicitado una transferencia de $5000.00 ARS
+a la cuenta: maria.gomez.ars
+
+Tu código de autorización es: 482910
+
+Si no solicitaste esta transferencia, ignorá este mensaje.
+```
+
 ---
 
 ### C.3) Confirmar Transferencia
+
 `POST /api/payments/transferir/confirmar`
 
-Confirma la transferencia con el código OTP recibido por correo. Descuenta el saldo del origen y acredita en el destino.
+Confirma la transferencia con el código OTP recibido por correo. **Fase 2 del proceso de 2 fases.**
+1. Bloquea el movimiento con `SELECT ... FOR UPDATE` (pessimistic lock)
+2. Valida que el movimiento exista y esté en `PENDIENTE_AUTORIZACION`
+3. Valida que el código OTP coincida
+4. Bloquea la cuenta origen con `SELECT ... FOR UPDATE`
+5. Re-verifica saldo suficiente (protección contra race conditions)
+6. Debita el monto de la cuenta origen
+7. Acredita el monto en la cuenta destino
+8. Actualiza el movimiento a `COMPLETADO`
 
 **Request:**
 ```json
@@ -323,128 +441,243 @@ Confirma la transferencia con el código OTP recibido por correo. Descuenta el s
 
 ## Servicio: Reverse Proxy
 
-El proxy corre en el puerto `8000` y enruta automáticamente según el path:
+El proxy corre en el puerto `8000` y es el punto de entrada único para todas las APIs. Está desarrollado íntegramente en Python con la biblioteca estándar (`http.server`), sin utilizar nginx ni ningún otro software preexistente.
 
-| Ruta | Destino |
-|---|---|
-| `/api/auth/*` | Backend (`:8080`) |
-| `/api/wallet/*` | Backend (`:8080`) |
-| `/api/rates/*` | Payment Gateway (`:5001`) |
-| `/api/payments/*` | Payment Gateway (`:5001`) |
+### Enrutamiento
 
-El proxy no utiliza nginx ni ningún otro software preexistente; está desarrollado manualmente en Python usando la librería estándar `http.server`.
+| Ruta | Método | Destino | Servicio |
+|---|---|---|---|
+| `/api/auth/*` | Cualquiera | `http://localhost:8080` | Backend |
+| `/api/wallet/*` | Cualquiera | `http://localhost:8080` | Backend |
+| `/api/rates/*` | Cualquiera | `http://localhost:5001` | Payment Gateway |
+| `/api/payments/*` | Cualquiera | `http://localhost:5001` | Payment Gateway |
+
+### Comportamiento
+
+- Reenvía el método HTTP, headers (excepto `Host` y `Transfer-Encoding`) y body originales
+- Recalcula `Content-Length` automáticamente
+- Propaga headers `Set-Cookie` para manejo de sesiones
+- Errores HTTP (4xx/5xx) → se reenvían con el mismo código y body
+- Error de conexión (servicio caído) → `502 Bad Gateway` con JSON
 
 ---
 
-## Modelo de Base de Datos (PostgreSQL)
+## Modelo de Base de Datos (PostgreSQL 16)
 
 ### Tabla: `usuarios`
 
-| Columna | Tipo | Descripción |
-|---|---|---|
-| `id` | UUID (PK) | Identificador único |
-| `dni` | VARCHAR(20), UNIQUE | Documento nacional de identidad |
-| `email` | VARCHAR(255), UNIQUE | Correo electrónico |
-| `password_hash` | TEXT | Contraseña hasheada (BCrypt) |
-| `nombre_completo` | VARCHAR(255) | Nombre completo |
-| `fecha_nacimiento` | DATE | Fecha de nacimiento |
-| `estado_email` | ENUM('PENDIENTE','VERIFICADO') | Estado de verificación del email |
-| `codigo_verificacion_email` | VARCHAR(6) | Código de 6 dígitos para verificación |
-| `token_recuperacion_pass` | VARCHAR(255) | Token para recuperación de contraseña |
+| Columna | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | UUID | PK, default `gen_random_uuid()` | Identificador único del usuario |
+| `dni` | VARCHAR(20) | UNIQUE, NOT NULL | Documento nacional de identidad |
+| `email` | VARCHAR(255) | UNIQUE, NOT NULL | Correo electrónico |
+| `password_hash` | TEXT | NOT NULL | Contraseña hasheada con BCrypt |
+| `nombre_completo` | VARCHAR(255) | NOT NULL | Nombre completo del usuario |
+| `fecha_nacimiento` | DATE | NOT NULL | Fecha de nacimiento |
+| `estado_email` | VARCHAR(20) | NOT NULL, default `PENDIENTE` | Estado de verificación: `PENDIENTE`, `VERIFICADO` |
+| `codigo_verificacion_email` | VARCHAR(6) | nullable | Código OTP de 6 dígitos para verificar email |
+| `token_recuperacion_pass` | VARCHAR(255) | nullable | Token UUID para recuperación de contraseña |
 
 ### Tabla: `cuentas`
 
-| Columna | Tipo | Descripción |
-|---|---|---|
-| `id` | UUID (PK) | Identificador único |
-| `usuario_id` | UUID (FK) | Referencia al usuario dueño |
-| `moneda` | ENUM('ARS','USD') | Tipo de moneda |
-| `saldo` | DECIMAL(19,2) | Saldo disponible |
-| `alias` | VARCHAR(100), UNIQUE | Alias único para transferencias |
+| Columna | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | UUID | PK | Identificador único de la cuenta |
+| `usuario_id` | UUID | FK → usuarios(id), NOT NULL | Referencia al usuario propietario |
+| `moneda` | VARCHAR(3) | NOT NULL | Tipo de moneda: `ARS` o `USD` |
+| `saldo` | DECIMAL(19,2) | NOT NULL, default 0.00 | Saldo disponible |
+| `alias` | VARCHAR(100) | UNIQUE, NOT NULL | Alias único para transferencias |
+
+**Nota:** Al registrarse, cada usuario recibe automáticamente dos cuentas:
+- ARS con alias `{nombre}.{apellido}.ars`
+- USD con alias `{nombre}.{apellido}.usd`
 
 ### Tabla: `movimientos`
 
-| Columna | Tipo | Descripción |
-|---|---|---|
-| `id` | UUID (PK) | Identificador único |
-| `cuenta_origen_id` | UUID (FK, nullable) | Cuenta de origen (null en depósitos) |
-| `cuenta_destino_id` | UUID (FK) | Cuenta de destino |
-| `monto` | DECIMAL(19,2) | Monto transferido |
-| `tipo_movimiento` | ENUM('TRANSFERENCIA','DEPOSITO','RETIRO') | Tipo de movimiento |
-| `estado_movimiento` | ENUM('PENDIENTE_AUTORIZACION','COMPLETADO','FALLIDO') | Estado del movimiento |
-| `descripcion` | VARCHAR(500) | Descripción opcional |
-| `fecha_creacion` | TIMESTAMP | Fecha de creación |
-| `fecha_autorizacion` | TIMESTAMP | Fecha de autorización (nullable) |
-| `codigo_autorizacion` | VARCHAR(6) | Código OTP para autorizar transferencia |
+| Columna | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| `id` | UUID | PK | Identificador único del movimiento |
+| `cuenta_origen_id` | UUID | FK → cuentas(id), nullable | Cuenta de origen (null en depósitos) |
+| `cuenta_destino_id` | UUID | FK → cuentas(id), NOT NULL | Cuenta de destino |
+| `monto` | DECIMAL(19,2) | NOT NULL | Monto transferido |
+| `tipo_movimiento` | VARCHAR(20) | NOT NULL | Tipo: `TRANSFERENCIA`, `DEPOSITO`, `RETIRO` |
+| `estado_movimiento` | VARCHAR(20) | NOT NULL, default `PENDIENTE_AUTORIZACION` | Estado: `PENDIENTE_AUTORIZACION`, `COMPLETADO`, `FALLIDO` |
+| `descripcion` | VARCHAR(500) | nullable | Descripción legible del movimiento |
+| `fecha_creacion` | TIMESTAMP | NOT NULL, updatable=false | Fecha y hora de creación |
+| `fecha_autorizacion` | TIMESTAMP | nullable | Fecha y hora de autorización/confirmación |
+| `codigo_autorizacion` | VARCHAR(6) | nullable | Código OTP de 6 dígitos para autorizar |
 
 ---
 
 ## Flujo Completo de Transferencia
 
-```
-1. POST /api/payments/transferir/iniciar
-   ├── Payment Gateway verifica fondos
-   ├── Crea movimiento en PENDIENTE_AUTORIZACION
-   └── Envía código OTP por email al remitente
+### Fase 1: Iniciar
 
-2. POST /api/payments/transferir/confirmar
-   ├── Payment Gateway valida el código OTP
-   ├── Descuenta saldo de la cuenta origen
-   ├── Acredita saldo en la cuenta destino
-   └── Actualiza movimiento a COMPLETADO
 ```
+Cliente                              Payment Gateway                     DB
+  │                                       │                              │
+  │  POST /api/payments/transferir/iniciar │                              │
+  │  {email_remitente, cuenta_origen,     │                              │
+  │   alias_destino, monto}               │                              │
+  │──────────────────────────────────────►│                              │
+  │                                       │  Verificar alias destino     │
+  │                                       │─────────────────────────────►│
+  │                                       │◄─────────────────────────────│
+  │                                       │  Verificar cuenta origen     │
+  │                                       │─────────────────────────────►│
+  │                                       │◄─────────────────────────────│
+  │                                       │  Verificar saldo suficiente  │
+  │                                       │  Generar OTP 6 dígitos       │
+  │                                       │  INSERT movimiento PENDIENTE │
+  │                                       │─────────────────────────────►│
+  │                                       │  Enviar email con OTP        │
+  │                                       │  (smtplib → Gmail SMTP)     │
+  │  202 {id_transaccion, success}        │                              │
+  │◄──────────────────────────────────────│                              │
+```
+
+### Fase 2: Confirmar
+
+```
+Cliente                              Payment Gateway                     DB
+  │                                       │                              │
+  │  POST /api/payments/transferir/confirmar│                             │
+  │  {id_transaccion, codigo_autorizacion} │                              │
+  │──────────────────────────────────────►│                              │
+  │                                       │  SELECT ... FOR UPDATE       │
+  │                                       │  (bloquea movimiento)        │
+  │                                       │─────────────────────────────►│
+  │                                       │  Validar OTP y estado        │
+  │                                       │  SELECT ... FOR UPDATE       │
+  │                                       │  (bloquea cuenta origen)     │
+  │                                       │─────────────────────────────►│
+  │                                       │  Re-validar saldo            │
+  │                                       │  UPDATE saldo origen -= monto│
+  │                                       │─────────────────────────────►│
+  │                                       │  UPDATE saldo destino += monto│
+  │                                       │─────────────────────────────►│
+  │                                       │  UPDATE movimiento COMPLETADO│
+  │                                       │─────────────────────────────►│
+  │  200 {id_transaccion, success}        │                              │
+  │◄──────────────────────────────────────│                              │
+```
+
+---
+
+## Configuración del Sistema de Correos
+
+El envío de correos electrónicos se realiza desde el Payment Gateway mediante `smtplib` conectándose al servidor SMTP de Gmail.
+
+### Variables de Entorno (`.env`)
+
+| Variable | Default | Descripción |
+|---|---|---|
+| `SMTP_SERVER` | `smtp.gmail.com` | Servidor SMTP |
+| `SMTP_PORT` | `587` | Puerto TLS |
+| `SMTP_USER` | — | Dirección de Gmail |
+| `SMTP_PASSWORD` | — | Contraseña de aplicación de Gmail |
+| `BACKEND_URL` | `http://localhost:8080` | URL del backend (para links en emails) |
+| `DB_HOST` | `localhost` | Host de PostgreSQL |
+| `DB_PORT` | `5432` | Puerto de PostgreSQL |
+| `DB_NAME` | `billetera_virtual` | Nombre de la base de datos |
+| `DB_USER` | `user` | Usuario de base de datos |
+| `DB_PASSWORD` | `password` | Contraseña de base de datos |
+
+### Tipos de Correos Enviados
+
+| Contexto | Destinatario | Contenido |
+|---|---|---|
+| Inicio de transferencia | Remitente | Código OTP de 6 dígitos para autorizar la transferencia |
+
+> **Nota:** El código de verificación de email (registro) y el token de recuperación de contraseña se generan y almacenan en la base de datos, pero su envío por correo debe implementarse como paso adicional.
+
+---
+
+## Seguridad
+
+| Aspecto | Implementación |
+|---|---|
+| **Contraseñas** | Hasheadas con BCrypt (Spring Security) |
+| **Sesiones** | Cookies HTTP-only, Spring Session JDBC, timeout 30 min |
+| **CSRF** | Deshabilitado (SPA con cookie-based auth) |
+| **Transferencias** | Two-phase commit con OTP + pessimistic locks (`FOR UPDATE`) |
+| **Verificación email** | Código OTP de 6 dígitos |
+| **Recuperación password** | Token UUID único |
+
+---
+
+## Frontend
+
+### Páginas
+
+| Archivo | Ruta | Descripción |
+|---|---|---|
+| `index.html` | `/` | Inicio de sesión (email/DNI + contraseña) |
+| `register.html` | `/register.html` | Registro de usuario |
+| `verify-email.html` | `/verify-email.html` | Ingreso de código OTP de 6 dígitos (campos individuales con auto-foco) |
+| `forgot-password.html` | `/forgot-password.html` | Solicitud de recuperación de contraseña |
+| `reset-password.html` | `/reset-password.html?token=...` | Creación de nueva contraseña |
+| `dashboard.html` | `/dashboard.html` | Panel principal: saldos, cotización, transferencias, historial |
+
+### Funcionalidades del Dashboard
+
+- Visualización de saldos ARS y USD
+- Cotización del dólar en tiempo real (desde BCRA)
+- Formulario de transferencia con selector de moneda
+- Modal de confirmación con ingreso de OTP
+- Historial de movimientos con estados
+- Botón de cierre de sesión
+
+### Estilos
+
+- Tema oscuro con acentos en cian (`#06b6d4`) y verde (`#10b981`)
+- Efectos glassmorphism (backdrop-filter blur)
+- Gradientes y sombras
+- Diseño responsivo (sidebar colapsable en mobile)
 
 ---
 
 ## Cómo Ejecutar
 
 ```bash
-# 1. Backend (Spring Boot)
+# 1. Base de datos
+docker compose up -d
+
+# 2. Backend (Spring Boot)
 cd backend/
 ./gradlew bootRun
 
-# 2. Payment Gateway
+# 3. Payment Gateway
 cd payment-gateway/
+cp .env.example .env   # configurar credenciales SMTP
 pip install -r requirements.txt
 python app.py
 
-# 3. Reverse Proxy
+# 4. Reverse Proxy
 cd proxy/
 python proxy.py
+
+# 5. Frontend
+cd frontend/
+python3 -m http.server 3000
 ```
 
-El punto de entrada para el frontend es `http://localhost:8000`.
+Acceder a `http://localhost:3000` (frontend) o `http://localhost:8000` (API entry point).
 
 ---
 
-## Frontend
+## Resumen de Endpoints
 
-El frontend es una aplicación web SPA de páginas múltiples ubicada en `frontend/`.
-
-### Páginas
-
-| Archivo | Descripción |
-|---|---|
-| `index.html` | Inicio de sesión |
-| `register.html` | Registro de usuario |
-| `verify-email.html` | Verificación de email con código OTP de 6 dígitos |
-| `forgot-password.html` | Solicitud de recuperación de contraseña |
-| `reset-password.html` | Creación de nueva contraseña |
-| `dashboard.html` | Panel principal: saldos, transferencias e historial |
-
-### Diseño
-
-- Interfaz oscura moderna con acentos en cian (`#06b6d4`) y verde (`#10b981`)
-- Gradientes y efectos glassmorphism (blur + backdrop-filter)
-- Componentes: cards de saldo, tabs de moneda, inputs OTP, modales de confirmación
-- Totalmente responsivo
-
-### Para servir el frontend
-
-```bash
-cd frontend/
-python3 -m http.server 3000
-# o cualquier servidor estático
-```
-
-Luego acceder a `http://localhost:3000` (o a través del proxy en `http://localhost:8000`).
+| Método | Path | Auth | Servicio | Descripción |
+|---|---|---|---|---|
+| `POST` | `/api/auth/registro` | No | Backend | Registrar usuario + crear cuentas ARS/USD |
+| `POST` | `/api/auth/validar-email` | No | Backend | Verificar email con código OTP |
+| `POST` | `/api/auth/login` | No | Backend | Iniciar sesión (email/DNI + password) |
+| `POST` | `/api/auth/olvide-password` | No | Backend | Solicitar token de recuperación |
+| `POST` | `/api/auth/reset-password` | No | Backend | Restablecer contraseña con token |
+| `GET` | `/api/auth/me` | Sí | Backend | Obtener perfil del usuario actual |
+| `GET` | `/api/wallet/estado` | Sí | Backend | Obtener saldos y alias de cuentas |
+| `GET` | `/api/wallet/movimientos` | Sí | Backend | Obtener historial de movimientos |
+| `GET` | `/api/rates/usd` | No | Payment Gateway | Cotización oficial USD/ARS (BCRA) |
+| `POST` | `/api/payments/transferir/iniciar` | No | Payment Gateway | Iniciar transferencia + enviar OTP por email |
+| `POST` | `/api/payments/transferir/confirmar` | No | Payment Gateway | Confirmar transferencia con OTP |

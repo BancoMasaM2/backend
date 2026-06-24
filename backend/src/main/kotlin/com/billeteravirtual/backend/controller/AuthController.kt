@@ -9,10 +9,14 @@ import com.billeteravirtual.backend.dto.response.AuthResponse
 import com.billeteravirtual.backend.dto.response.UsuarioResponse
 import com.billeteravirtual.backend.service.AuthService
 import com.billeteravirtual.backend.service.UsuarioService
+import jakarta.servlet.http.HttpServletRequest
+import jakarta.servlet.http.HttpServletResponse
+import jakarta.servlet.http.HttpSession
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.annotation.AuthenticationPrincipal
+import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.security.core.userdetails.UserDetails
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
@@ -41,8 +45,16 @@ class AuthController(
     }
 
     @PostMapping("/login")
-    fun login(@Valid @RequestBody request: LoginRequest): ResponseEntity<AuthResponse> {
+    fun login(
+        @Valid @RequestBody request: LoginRequest,
+        httpRequest: HttpServletRequest,
+        httpResponse: HttpServletResponse
+    ): ResponseEntity<AuthResponse> {
         val response = authService.login(request)
+        if (response.success) {
+            val session: HttpSession = httpRequest.getSession(true)
+            session.setAttribute("SPRING_SECURITY_CONTEXT", SecurityContextHolder.getContext())
+        }
         return if (response.success) ResponseEntity.ok(response)
         else ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response)
     }

@@ -16,11 +16,6 @@ spring:
       hibernate:
         format_sql: true
 
-  session:
-    store-type: jdbc
-    jdbc:
-      initialize-schema: always
-
 server:
   port: 8080
   servlet:

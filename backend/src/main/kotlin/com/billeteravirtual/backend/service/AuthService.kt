@@ -14,6 +14,7 @@ import com.billeteravirtual.backend.repository.CuentaRepository
 import com.billeteravirtual.backend.repository.UsuarioRepository
 import org.springframework.security.authentication.AuthenticationManager
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
+import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -38,7 +39,7 @@ class AuthService(
         val usuario = Usuario(
             dni = request.dni,
             email = request.email,
-            passwordHash = passwordEncoder.encode(request.password),
+            passwordHash = passwordEncoder.encode(request.password)!!,
             nombreCompleto = request.nombreCompleto,
             fechaNacimiento = request.fechaNacimiento,
             codigoVerificacionEmail = codigo
@@ -74,9 +75,10 @@ class AuthService(
                 usuarioRepository.findByDni(request.identificador).orElse(null)
             } ?: return AuthResponse(mensaje = "Credenciales inválidas", success = false)
 
-        authenticationManager.authenticate(
+        val auth = authenticationManager.authenticate(
             UsernamePasswordAuthenticationToken(usuario.email, request.password)
         )
+        SecurityContextHolder.getContext().authentication = auth
         return AuthResponse(mensaje = "Inicio de sesión exitoso", success = true)
     }
 
@@ -99,7 +101,7 @@ class AuthService(
 
         usuarioRepository.save(
             usuario.copy(
-                passwordHash = passwordEncoder.encode(request.nuevaPassword),
+                passwordHash = passwordEncoder.encode(request.nuevaPassword)!!,
                 tokenRecuperacionPass = null
             )
         )
