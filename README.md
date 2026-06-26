@@ -1,4 +1,4 @@
-# Banco GCDR — Broker Simulador
+# Banco MASA — Broker Simulador
 
 Plataforma financiera digital que simula operaciones bancarias básicas: cuentas en ARS y USD, transferencias entre usuarios, compra de dólar blue y pagos en línea. Arquitectura orientada a microservicios con un API Gateway como único punto de entrada.
 
