@@ -300,10 +300,10 @@ def operaciones_pago(request):
 # ─── Payment Gateway ─────────────────────────────────────────────────────────
 
 
-async def _obtener_cotizacion(tipo="blue"):
+def _obtener_cotizacion(tipo="blue"):
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(DOLARAPI_URL.format(tipo=tipo))
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(DOLARAPI_URL.format(tipo=tipo))
             resp.raise_for_status()
             data = resp.json()
             return {
@@ -326,9 +326,7 @@ async def _obtener_cotizacion(tipo="blue"):
 
 @api_view(["GET"])
 def payments_cotizacion(request):
-    import asyncio
-
-    data = asyncio.run(_obtener_cotizacion(request.query_params.get("tipo", "blue")))
+    data = _obtener_cotizacion(request.query_params.get("tipo", "blue"))
     return Response(data)
 
 
@@ -351,9 +349,7 @@ def payments_conversiones(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    import asyncio
-
-    cotizacion = asyncio.run(_obtener_cotizacion("blue"))
+    cotizacion = _obtener_cotizacion("blue")
 
     if desde == "ARS" and hacia == "USD":
         tasa = cotizacion["venta"]
