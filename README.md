@@ -139,6 +139,11 @@ Capa intermedia entre rutas y base de datos. Contiene la lógica de negocio:
 
 ### Ubicación: `proxy/`
 
+### En el mateoboggio@etec-System-Product-Name:~/la-prueba-de-la-prueba$   ejecutar: 
+source proxy/.venv/bin/activate
+uvicorn proxy.main:app --host 0.0.0.0 --port 7000 --reload
+
+
 Actúa como **reverse proxy** y **punto único de entrada** para el frontend. Ningún otro servicio es accesible directamente desde el navegador.
 
 ### Funcionamiento interno
