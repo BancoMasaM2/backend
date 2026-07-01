@@ -419,40 +419,40 @@ cd frontend && npm run dev
 
 Cada servicio puede ejecutarse en una máquina diferente mediante variables de entorno.
 
-### Esquema de red típico
+### Esquema de red
 
-| Servicio | PC | Puerto |
+| Servicio | IP | Puerto |
 |---|---|---|
-| Backend Django | PC1 (192.168.1.10) | 8000 |
-| Payment Gateway | PC2 (192.168.1.20) | 8001 |
-| API Gateway | PC3 (192.168.1.30) | 7000 |
-| Frontend | PC4 (192.168.1.40) | 5173 |
+| Backend Django | 192.168.220.127 | 8000 |
+| Payment Gateway | 192.168.220.125 | 8001 |
+| API Gateway | 192.168.220.113 | 7000 |
+| Frontend | 192.168.220.123 | 5173 |
 
-### Comandos distribuidos
+### Comandos de ejecución distribuida
 
-**PC1 — Backend Django**
+**192.168.220.127 — Backend Django**
 ```bash
 cd backend_django
 python manage.py runserver 0.0.0.0:8000
 ```
 
-**PC2 — Payment Gateway**
+**192.168.220.125 — Payment Gateway**
 ```bash
-GATEWAY_URL=http://192.168.1.30:7000 uvicorn payment_gateway.main:app --host 0.0.0.0 --port 8001 --reload
+GATEWAY_URL=http://192.168.220.113:7000 uvicorn payment_gateway.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
-**PC3 — API Gateway**
+**192.168.220.113 — API Gateway**
 ```bash
-BACKEND_URL=http://192.168.1.10:8000 \
-PAYMENT_GATEWAY_URL=http://192.168.1.20:8001 \
-CORS_ORIGINS=http://192.168.1.40:5173 \
+BACKEND_URL=http://192.168.220.127:8000 \
+PAYMENT_GATEWAY_URL=http://192.168.220.125:8001 \
+CORS_ORIGINS=http://192.168.220.123:5173 \
 uvicorn proxy.main:app --host 0.0.0.0 --port 7000 --reload
 ```
 
-**PC4 — Frontend**
+**192.168.220.123 — Frontend**
 ```bash
 cd frontend
-VITE_GATEWAY_URL=http://192.168.1.30:7000 npm run dev
+VITE_GATEWAY_URL=http://192.168.220.113:7000 npm run dev
 ```
 
 ### Consideraciones
