@@ -8,7 +8,7 @@ Plataforma financiera digital que simula operaciones bancarias básicas: cuentas
 
 - [Arquitectura general](#arquitectura-general)
 - [Tecnologías utilizadas](#tecnologías-utilizadas)
-- [Backend](#backend)
+- [Backend (Django)](#backend-django)
 - [API Gateway (Proxy)](#api-gateway-proxy)
 - [Payment Gateway (Pasarela de Pagos)](#payment-gateway-pasarela-de-pagos)
 - [Frontend](#frontend)
@@ -30,108 +30,144 @@ Plataforma financiera digital que simula operaciones bancarias básicas: cuentas
                               │
               ┌───────────────┴───────────────┐
               ▼                               ▼
-     ┌────────────────┐            ┌──────────────────┐
-     │    Backend     │            │ Payment Gateway  │
-     │  FastAPI :8000 │◀──────────▶│  FastAPI :8001   │
-     │  (SQLite +     │   HTTP     │  (cotizaciones,  │
-     │   operaciones) │            │   conversiones)  │
-     └────────────────┘            └──────────────────┘
+     ┌──────────────────┐            ┌──────────────────┐
+     │    Backend       │            │ Payment Gateway  │
+     │  Django :8000    │◀──────────▶│  FastAPI :8001   │
+     │  (SQLite + DRF)  │   HTTP     │  (cotizaciones,  │
+     │   operaciones)   │            │   conversiones)  │
+     └──────────────────┘            └──────────────────┘
 ```
 
-Cada servicio es una aplicación **FastAPI** independiente. El **API Gateway** actúa como reverse proxy y único punto de contacto para el frontend, enrutando las peticiones según el prefijo de la ruta.
+El **API Gateway** actúa como reverse proxy y único punto de contacto para el frontend, enrutando las peticiones según el prefijo de la ruta. El backend está construido con **Django REST Framework**, mientras que el proxy y la pasarela de pagos son **FastAPI**.
 
 ---
 
 ## Tecnologías utilizadas
 
-### Backend / Proxy / Payment Gateway
+### Backend (Django)
 
 | Tecnología | Versión | Propósito |
 |---|---|---|
-| **Python** | 3.12+ | Lenguaje base de los tres servicios backend |
-| **FastAPI** | 0.115.0 | Framework web ASGI para construir APIs REST con tipado estático, documentación automática (OpenAPI/Swagger) y soporte nativo de asincronía |
-| **Uvicorn** | 0.30.6 | Servidor ASGI de alto rendimiento basado en `uvloop` y `httptools`. Ejecuta las aplicaciones FastAPI |
-| **SQLAlchemy** | 2.0.35 | ORM (Object-Relational Mapper) para interactuar con SQLite mediante modelos Python. Soporta `asyncio` y `sessionmaker` para manejo de sesiones |
-| **Pydantic** | 2.9.2 | Validación de datos por medio de modelos con type hints. FastAPI lo usa internamente para parsear requests y responses |
-| **httpx** | 0.27.2 | Cliente HTTP asíncrono para comunicación entre microservicios. Reemplaza a `requests` con soporte nativo de `async/await` |
-| **SQLite** | — | Motor de base de datos embebido, sin servidor. Almacena el archivo `backend/database.db` |
-| **python-dotenv** | 1.0.1 | Carga variables de entorno desde archivos `.env` |
-| **Alembic** | 1.13.2 | Migraciones de base de datos (presente en dependencias, aunque el proyecto usa migraciones manuales con `ALTER TABLE`) |
+| **Python** | 3.12+ | Lenguaje base |
+| **Django** | 5.1.1 | Framework web con ORM, migraciones y admin |
+| **Django REST Framework** | 3.15.2 | Construcción de APIs REST con serializadores y views |
+| **django-cors-headers** | 4.4.0 | Middleware CORS (deshabilitado en producción; lo maneja el proxy) |
+| **httpx** | 0.27.2 | Cliente HTTP para obtener cotizaciones de dolarapi.com |
+| **python-dotenv** | 1.0.1 | Carga variables de entorno desde `.env` |
+| **SQLite** | — | Motor de base de datos embebido. Archivo: `backend_django/db.sqlite3` |
+
+### Proxy y Payment Gateway
+
+| Tecnología | Versión | Propósito |
+|---|---|---|
+| **FastAPI** | 0.115.0 | Framework web ASGI para APIs REST con documentación OpenAPI automática |
+| **Uvicorn** | 0.30.6 | Servidor ASGI de alto rendimiento |
+| **httpx** | 0.27.2 | Cliente HTTP asíncrono para comunicación entre microservicios |
+| **Pydantic** | 2.9.2 | Validación de datos mediante modelos con type hints |
 
 ### Frontend
 
 | Tecnología | Versión | Propósito |
 |---|---|---|
-| **React** | 18.2.0 | Librería para construir interfaces de usuario basadas en componentes reactivos |
-| **Vite** | 7.0.0 | Bundler y dev server ultrarrápido. Usa esbuild para transformación y Rollup para empaquetado en producción |
-| **React Router DOM** | 6.20.0 | Enrutamiento declarativo del lado del cliente. Maneja las transiciones entre vistas sin recargar la página |
-| **JavaScript (ES Modules)** | — | Lenguaje del frontend. Los módulos se importan estáticamente con `import/export` |
-| **CSS-in-JS (inline styles)** | — | Estrategia de estilos. Cada componente define su objeto `styles` con las reglas CSS en notación camelCase |
+| **React** | 18.2.0 | Librería para interfaces de usuario basadas en componentes |
+| **Vite** | 7.0.0 | Bundler y dev server ultrarrápido |
+| **React Router DOM** | 6.20.0 | Enrutamiento declarativo del lado del cliente |
+| **JavaScript (ES Modules)** | — | Lenguaje del frontend |
 
 ### Comunicación entre servicios
 
 - **Frontend → Gateway**: `fetch()` desde el navegador hacia `http://<gateway>:7000`
-- **Gateway → Backend**: `httpx.AsyncClient` (peticiones HTTP asíncronas)
-- **Gateway → Payment Gateway**: `httpx.AsyncClient`
-- **Payment Gateway → Gateway → Backend**: La pasarela envía las operaciones de escritura (conversiones, transferencias, pagos) al Gateway (`GATEWAY_URL`), que las reenvía al Backend para que persista en la base de datos
+- **Gateway → Backend**: `httpx.AsyncClient` hacia Django en `:8000`
+- **Gateway → Payment Gateway**: `httpx.AsyncClient` hacia FastAPI en `:8001`
+- **Payment Gateway → Gateway → Backend**: La pasarela envía operaciones de escritura al Gateway (`GATEWAY_URL`), que las reenvía al Backend Django para persistir en la base de datos
 
 ---
 
-## Backend
+## Backend (Django)
 
-### Ubicación: `backend/`
+### Ubicación: `backend_django/`
 
-Servicio principal que concentra la lógica de negocio y el acceso a la base de datos.
+Servicio principal que concentra la lógica de negocio, acceso a la base de datos y autenticación. Construido con Django REST Framework, se ejecuta con `manage.py runserver`.
 
-### Modelos de datos (`backend/models/`)
+### Estructura
 
-Cuatro tablas definidas mediante SQLAlchemy ORM:
+```
+backend_django/
+├── manage.py
+├── requirements.txt           # Django, DRF, corsheaders, httpx, python-dotenv
+├── .env                       # SMTP y DJANGO_SECRET_KEY
+├── db.sqlite3                 # Base de datos SQLite
+├── config/
+│   ├── settings.py            # Configuración de Django
+│   ├── urls.py                # Raíz → incluye api.urls
+│   └── wsgi.py                # Entrypoint WSGI
+└── api/
+    ├── models.py              # Usuario, Cuenta, Transferencia, Pago
+    ├── serializers.py         # DRF serializers
+    ├── views.py               # Endpoints (auth, usuarios, cuentas, operaciones, payments, health)
+    ├── urls.py                # Enrutamiento de la API
+    ├── services.py            # Lógica de negocio
+    ├── utils.py               # SMTP email sender + exception handler
+    └── migrations/
+        └── 0001_initial.py    # Migración inicial
+```
 
-**Usuario** (`usuario.py`)
-- `id`, `nombre`, `email` (único), `password` (texto plano en esta simulación), `fecha_creacion`
+### Modelos de datos (`api/models.py`)
+
+Cuatro tablas definidas como modelos de Django ORM:
+
+**Usuario**
+- `id`, `nombre`, `email` (único), `password` (texto plano — simulación educativa), `fecha_creacion`
 - `verificado`, `codigo_verificacion`, `codigo_expiracion` — flujo de verificación por email
 - `alias` — identificador único amigable para transferencias
-- `transfer_codigo`, `transfer_codigo_expiracion`, `transfer_destino_alias`, `transfer_moneda`, `transfer_monto` — estado de una transferencia en curso (two-step confirmation)
+- `transfer_codigo`, `transfer_codigo_expiracion`, `transfer_destino_alias`, `transfer_moneda`, `transfer_monto` — estado de una transferencia en curso (confirmación en 2 pasos)
 
-**Cuenta** (`cuenta.py`)
+**Cuenta**
 - `id`, `usuario_id` (FK), `moneda` (ARS/USD), `saldo`
-- Restricción `UNIQUE(usuario_id, moneda)` — un usuario tiene exactamente una cuenta por moneda
+- Restricción `unique_together("usuario", "moneda")` — un usuario tiene una cuenta por moneda
 
-**Transferencia** (`transferencia.py`)
+**Transferencia**
 - `id`, `origen_id` (FK → cuentas), `destino_id` (FK → cuentas), `monto`, `moneda`, `fecha`, `estado`
-- Almacena tanto transferencias entre usuarios como conversiones de moneda (en cuyo caso `moneda` es `"ARS->USD"` y ambas cuentas pertenecen al mismo usuario)
+- Almacena transferencias entre usuarios y conversiones de moneda (moneda: `"ARS->USD"`, ambas cuentas del mismo usuario)
 
-**Pago** (`pago.py`)
+**Pago**
 - `id`, `usuario_id` (FK), `monto`, `descripcion`, `fecha`, `estado`
 
-### Rutas de la API (`backend/routes/`)
+### Rutas de la API (`api/urls.py`)
 
-Cada router se monta con un prefijo y se registra en `main.py` mediante `app.include_router()`.
+| Ruta | View | Método | Descripción |
+|---|---|---|---|
+| `/api/auth/registro` | `auth_registro` | POST | Registro con verificación por email |
+| `/api/auth/verificar-codigo` | `auth_verificar_codigo` | POST | Verifica código OTP de 6 dígitos |
+| `/api/auth/reenviar-codigo` | `auth_reenviar_codigo` | POST | Reenvía el código de verificación |
+| `/api/auth/login` | `auth_login` | POST | Inicio de sesión |
+| `/api/usuarios/{id}` | `usuario_detail` | GET | Perfil del usuario |
+| `/api/usuarios/alias/{alias}` | `usuario_por_alias` | GET | Búsqueda por alias |
+| `/api/usuarios/{id}/alias` | `usuario_alias_update` | PUT | Actualiza el alias |
+| `/api/usuarios/{id}/movimientos` | `usuario_movimientos` | GET | Historial consolidado |
+| `/api/cuentas/{usuario_id}` | `cuentas_usuario` | GET | Cuentas del usuario |
+| `/api/cuentas/{usuario_id}/{moneda}` | `cuenta_usuario_moneda` | GET | Cuenta por moneda |
+| `/api/operaciones/transferir` | `operaciones_transferir` | POST | Transferencia directa entre usuarios |
+| `/api/operaciones/iniciar-transferencia` | `operaciones_iniciar_transferencia` | POST | Inicia transferencia en 2 pasos (envía código) |
+| `/api/operaciones/confirmar-transferencia` | `operaciones_confirmar_transferencia` | POST | Confirma transferencia con código |
+| `/api/operaciones/conversion` | `operaciones_conversion` | POST | Conversión ARS↔USD |
+| `/api/operaciones/pago` | `operaciones_pago` | POST | Pago desde cuenta ARS |
+| `/api/payments/cotizacion` | `payments_cotizacion` | GET | Cotización del dólar (endpoint directo) |
+| `/api/payments/conversiones` | `payments_conversiones` | POST | Conversión con cotización (endpoint directo) |
+| `/api/payments/pagos` | `payments_pagos` | POST | Pago (endpoint directo) |
+| `/api/payments/transferencias` | `payments_transferencias` | POST | Transferencia (endpoint directo) |
+| `/health/` | `health` | GET | Health check |
 
-| Router | Prefijo | Endpoints |
-|---|---|---|
-| `auth.py` | `/api/auth` | `POST /registro`, `POST /verificar-codigo`, `POST /reenviar-codigo`, `POST /login` |
-| `usuarios.py` | `/api/usuarios` | `GET /{id}`, `GET /alias/{alias}`, `PUT /{id}/alias`, `GET /{id}/movimientos` |
-| `cuentas.py` | `/api/cuentas` | `GET /{usuario_id}`, `GET /{usuario_id}/{moneda}` |
-| `operaciones.py` | `/api/operaciones` | `POST /transferir`, `POST /iniciar-transferencia`, `POST /confirmar-transferencia`, `POST /conversion`, `POST /pago` |
+### Servicios (`api/services.py`)
 
-### Servicios (`backend/services/`)
+Capa intermedia entre views y base de datos. Contiene la lógica de negocio:
 
-Capa intermedia entre rutas y base de datos. Contiene la lógica de negocio:
-
-- **`auth_service.py`**: registro con verificación por email, login con validación de credenciales, generación y verificación de códigos OTP (one-time password) de 6 dígitos
-- **`cuenta_service.py`**: consultas de cuentas por usuario y moneda
-- **`usuario_service.py`**: perfil de usuario, actualización de alias, y `obtener_movimientos()` que construye el historial consolidado (mezcla transferencias, conversiones y pagos ordenados por fecha descendente)
-- **`transferencia_service.py`**: flujo de dos pasos para transferencias seguras: `iniciar_transferencia()` envía un código por email, `confirmar_transferencia()` valida el código y ejecuta el movimiento
-
-### Base de datos (`backend/database/`)
-
-- `connection.py`: configura SQLAlchemy con `sqlite:///backend/database.db`. Usa `check_same_thread=False` porque FastAPI puede atender múltiples requests en distintos threads
-- `schema.sql`: DDL de las cuatro tablas. Las migraciones adicionales se ejecutan en `main.py` mediante `ALTER TABLE` con manejo silencioso de errores (para columnas ya existentes)
-
-### Utilidades (`backend/utils/`)
-
-- `email_sender.py`: envía emails mediante SMTP (configurado para Gmail). Si no hay credenciales SMTP configuradas, la función retorna silenciosamente sin enviar (modo desarrollo)
+- `registrar_usuario()`: crea usuario con cuentas ARS/USD, envía código de verificación por email
+- `verificar_usuario()` / `reenviar_codigo()`: flujo de verificación OTP
+- `login_usuario()`: validación de credenciales
+- `obtener_usuario_por_id()` / `obtener_usuario_por_alias()` / `actualizar_alias()`: gestión de perfil
+- `obtener_movimientos()`: historial consolidado (transferencias, conversiones y pagos ordenados por fecha)
+- `iniciar_transferencia()` / `confirmar_transferencia()`: flujo de transferencia en 2 pasos con código por email
 
 ---
 
@@ -154,46 +190,23 @@ PAYMENT_GATEWAY_URL = os.getenv("PAYMENT_GATEWAY_URL", "http://localhost:8001")
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
 ```
 
-El gateway define dos rutas comodín (capturan todo el subpath):
+El gateway define dos rutas comodín:
 
-1. **`/api/{path:path}`** — Reenvía la petición al Backend precediendo `BACKEND_URL`
+1. **`/api/{path:path}`** — Reenvía la petición al Backend Django
    - Ejemplo: `GET /api/cuentas/5` → `GET http://localhost:8000/api/cuentas/5`
 2. **`/payments/{path:path}`** — Reenvía la petición a la Payment Gateway
    - Ejemplo: `POST /payments/conversiones` → `POST http://localhost:8001/payments/conversiones`
 
 ### Función `_forward()`
 
-Es el núcleo del proxy. Realiza una copia exacta de la petición original:
-
-```python
-async def _forward(target_url, request):
-    body = await request.body()
-    headers = dict(request.headers)
-    headers.pop("host", None)  # evita conflictos de host
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.request(
-            method=request.method,
-            url=target_url,
-            content=body,
-            headers=headers,
-            params=request.query_params,
-        )
-        return Response(content=resp.content, status_code=resp.status_code, headers=dict(resp.headers))
-```
-
-**Características:**
-- **Reenvío transparente**: el método HTTP, headers, body y query params se transfieren idénticos
-- **Timeout de 30 segundos** por petición para evitar conexiones colgadas
-- **Manejo de errores**: si el servicio destino no responde, retorna `502 Bad Gateway` con el detalle del error
-- **CORS configurable**: se setea mediante la variable `CORS_ORIGINS` (separado por comas). Por defecto permite solo `http://localhost:5173`
+Núcleo del proxy. Realiza una copia exacta de la petición original (método HTTP, headers, body y query params). Timeout de 30 segundos. Si el servicio destino no responde, retorna `502 Bad Gateway`.
 
 ### ¿Por qué es necesaria esta capa?
 
 1. **Separación de responsabilidades**: el frontend solo conoce una URL (el gateway), no la topología interna
-2. **Seguridad**: los servicios internos (Backend, Payment Gateway) no exponen puertos al exterior
-3. **Flexibilidad**: se pueden agregar, quitar o reubicar servicios sin modificar el frontend
-4. **CORS centralizado**: se configura en un solo lugar en lugar de en cada microservicio
+2. **Seguridad**: los servicios internos no exponen puertos al exterior
+3. **Flexibilidad**: se pueden agregar o reubicar servicios sin modificar el frontend
+4. **CORS centralizado**: se configura en un solo lugar
 
 ---
 
@@ -201,35 +214,26 @@ async def _forward(target_url, request):
 
 ### Ubicación: `payment_gateway/`
 
-Microservicio especializado en operaciones financieras que requieren lógica adicional (cotizaciones, cálculos de conversión). No tiene acceso directo a la base de datos; todas las operaciones de escritura las delega al Backend a través del API Gateway.
+Microservicio FastAPI especializado en operaciones financieras (cotizaciones, conversiones). No tiene acceso directo a la base de datos; delega las operaciones de escritura al Backend Django a través del API Gateway.
 
-### Rutas (`payment_gateway/routes/`)
+### Rutas
 
-| Router | Prefijo | Endpoints |
-|---|---|---|
-| `transferencias.py` | `/payments` | `POST /transferencias` |
-| `conversiones.py` | `/payments` | `POST /conversiones`, `GET /cotizacion` |
-| `pagos.py` | `/payments` | `POST /pagos` |
+| Ruta | Descripción |
+|---|---|
+| `POST /payments/transferencias` | Transferencia entre usuarios |
+| `POST /payments/conversiones` | Conversión ARS↔USD con cotización en vivo |
+| `GET /payments/cotizacion` | Cotización del dólar blue/oficial |
+| `POST /payments/pagos` | Pago desde cuenta ARS |
 
 ### Servicios (`payment_gateway/services/`)
 
-- **`transferencia_service.py`**: recibe los datos de la transferencia y los reenvía al Backend (`{GATEWAY_URL}/api/operaciones/transferir`) para que persista el movimiento
-- **`conversion_service.py`**: obtiene la cotización actual del dólar blue mediante `cotizacion_api.py`, calcula el monto destino según la tasa correspondiente, y envía la operación al Backend (`{GATEWAY_URL}/api/operaciones/conversion`)
-- **`pago_service.py`**: reenvía el pago al Backend (`{GATEWAY_URL}/api/operaciones/pago`)
+- **`conversion_service.py`**: obtiene cotización de DolarAPI, calcula monto destino, envía operación al Backend por `{GATEWAY_URL}/api/operaciones/conversion`
+- **`pago_service.py`**: reenvía el pago a `{GATEWAY_URL}/api/operaciones/pago`
+- **`transferencia_service.py`**: reenvía la transferencia a `{GATEWAY_URL}/api/operaciones/transferir`
 
 ### Providers (`payment_gateway/providers/`)
 
-- **`cotizacion_api.py`**: consume la API externa [DolarAPI](https://dolarapi.com) para obtener cotizaciones en tiempo real. Incluye un **fallback** con valores por defecto si la API externa no responde. Los tipos de cotización disponibles son `"oficial"` y `"blue"`
-
-### Flujo de una conversión ARS → USD
-
-1. El frontend envía `POST /payments/conversiones` al Gateway
-2. El Gateway reenvía a la Payment Gateway: `POST /payments/conversiones`
-3. `conversion_service.py` obtiene la cotización blue de DolarAPI (o fallback)
-4. Calcula: `monto_destino = monto_origen / tasa_venta`
-5. Envía al Gateway: `POST {GATEWAY_URL}/api/operaciones/conversion`
-6. El Gateway reenvía al Backend: `POST /api/operaciones/conversion`
-7. El Backend debita la cuenta ARS, acredita la cuenta USD y registra una Transferencia con `moneda = "ARS->USD"`
+- **`cotizacion_api.py`**: consume [DolarAPI](https://dolarapi.com) para cotizaciones en tiempo real. Incluye fallback con valores por defecto si la API externa no responde
 
 ---
 
@@ -243,67 +247,37 @@ Aplicación web SPA (Single Page Application) construida con React y Vite.
 
 ```
 frontend/
-├── index.html              # Punto de entrada HTML
-├── vite.config.js          # Configuración de Vite (host, puerto)
-├── package.json            # Dependencias y scripts
-├── public/                 # Archivos estáticos
+├── index.html
+├── vite.config.js
+├── package.json
+├── public/
 └── src/
-    ├── main.jsx            # Punto de entrada React, monta BrowserRouter
+    ├── main.jsx            # Punto de entrada, monta BrowserRouter
     ├── App.jsx             # Componente raíz, define rutas y layout
     ├── services/
-    │   └── api.js          # Cliente HTTP, wrapper de fetch()
+    │   └── api.js          # Cliente HTTP hacia el Gateway
     ├── pages/
-    │   ├── Home.jsx        # Portal público del banco
-    │   ├── Login.jsx       # Inicio de sesión
-    │   ├── Registro.jsx    # Registro con verificación por email
-    │   ├── Dashboard.jsx   # Panel principal con saldos y cotización
-    │   ├── ComprarDolares.jsx  # Compra de USD con ARS
-    │   ├── Transferencias.jsx  # Transferencias entre usuarios (2 pasos)
-    │   ├── Pagos.jsx       # Pagos desde cuenta ARS
-    │   └── Historial.jsx   # Tabla de movimientos consolidados
+    │   ├── Home.jsx
+    │   ├── Login.jsx
+    │   ├── Registro.jsx
+    │   ├── Dashboard.jsx
+    │   ├── ComprarDolares.jsx
+    │   ├── Transferencias.jsx
+    │   ├── Pagos.jsx
+    │   └── Historial.jsx
     └── components/
-        ├── Navbar.jsx      # Barra de navegación del broker
-        ├── SaldoCard.jsx   # Card visual de saldo por moneda
-        └── FormTransferencia.jsx  # Formulario de transferencia
+        ├── Navbar.jsx
+        ├── SaldoCard.jsx
+        └── FormTransferencia.jsx
 ```
-
-### Enrutamiento
-
-El enrutamiento se maneja con `react-router-dom` v6. Las rutas protegidas verifican la existencia de `usuario_id` en `localStorage`:
-
-| Ruta | Componente | Acceso |
-|---|---|---|
-| `/` | Home | Público |
-| `/login` | Login | Público |
-| `/registro` | Registro | Público |
-| `/dashboard` | Dashboard | Autenticado |
-| `/transferencias` | Transferencias | Autenticado |
-| `/comprar-dolares` | ComprarDolares | Autenticado |
-| `/pagos` | Pagos | Autenticado |
-| `/historial` | Historial | Autenticado |
-| `*` | Redirección a `/` | — |
 
 ### Cliente HTTP (`services/api.js`)
 
-Función `request()` genérica que:
-1. Construye la URL completa anteponiendo `GATEWAY_URL` (configurable vía `VITE_GATEWAY_URL`, defecto `http://localhost:7000`)
-2. Serializa el body a JSON
-3. Agrega headers `Content-Type: application/json`
-4. Maneja errores HTTP lanzando excepciones con el mensaje del servidor
-
-Cada operación del banco expone un método en el objeto `api`:
-- `api.login()`, `api.registro()`, `api.verificarCodigo()`, `api.reenviarCodigo()`
-- `api.getPerfil()`, `api.getCuentas()`, `api.getMovimientos()`
-- `api.transferir()`, `api.iniciarTransferencia()`, `api.confirmarTransferencia()`
-- `api.convertir()`, `api.getCotizacion()`
-- `api.pagar()`
+Función `request()` genérica que construye la URL anteponiendo `VITE_GATEWAY_URL` (default `http://localhost:7000`), serializa el body a JSON, y maneja errores HTTP. Cada operación expone un método en el objeto `api`.
 
 ### Gestión de estado
 
-No se utiliza un estado global (Redux, Zustand, Context). La sesión se persiste en `localStorage` con tres claves:
-- `usuario_id` — identificador del usuario autenticado
-- `nombre` — nombre para mostrar en el Navbar
-- `alias` — alias del usuario para operaciones
+Sin estado global. La sesión se persiste en `localStorage` con tres claves: `usuario_id`, `nombre` y `alias`.
 
 ---
 
@@ -311,65 +285,53 @@ No se utiliza un estado global (Redux, Zustand, Context). La sesión se persiste
 
 ### Prerrequisitos
 
-| Software | Versión | Propósito |
-|---|---|---|
-| Python | 3.12+ | Entorno de ejecución de los servicios backend |
-| Node.js | 20+ | Entorno de ejecución del frontend y npm |
-| npm | (incluido) | Gestor de paquetes de Node.js |
+| Software | Versión |
+|---|---|
+| Python | 3.12+ |
+| Node.js | 20+ |
+| npm | (incluido) |
 
 ### Instalación de dependencias
 
 ```bash
-# Backend, Gateway y Payment Gateway comparten el mismo requirements.txt
+# Backend Django
+cd backend_django
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+
+# Proxy y Payment Gateway
+cd ..
+python -m venv venv && source venv/bin/activate
+pip install -r proxy/requirements.txt   # o requirements.txt raíz
 
 # Frontend
 cd frontend
 npm install
-cd ..
 ```
-
-**`requirements.txt`** incluye FastAPI, Uvicorn, SQLAlchemy, httpx, Pydantic, python-dotenv y Alembic. Se instalan de forma global (o en un virtual environment). FastAPI requiere Uvicorn como servidor ASGI porque FastAPI en sí mismo no es un servidor, es un framework que produce un objeto `app` ASGI. Uvicorn es quien realmente escucha en el puerto y despacha las peticiones al objeto `app`.
-
-**`npm install`** descarga React, React DOM, React Router DOM y Vite (con el plugin de React) desde el registro npm. Vite es el bundler que reemplaza a Webpack; ofrece recarga en caliente (HMR) en desarrollo y empaquetado optimizado con Rollup en producción.
 
 ### Comandos de ejecución
 
 ```bash
-# Terminal 1 — Backend (puerto 8000)
-uvicorn backend.main:app --port 8000 --reload
+# Terminal 1 — Backend Django (puerto 8000)
+cd backend_django
+source .venv/bin/activate
+python manage.py runserver 0.0.0.0:8000
 
 # Terminal 2 — Payment Gateway (puerto 8001)
+source venv/bin/activate
 uvicorn payment_gateway.main:app --port 8001 --reload
 
 # Terminal 3 — API Gateway (puerto 7000)
-uvicorn proxy.main:app --port 7000 --reload
+source venv/bin/activate
+BACKEND_URL=http://localhost:8000 uvicorn proxy.main:app --port 7000 --reload
 
 # Terminal 4 — Frontend (puerto 5173)
 cd frontend && npm run dev
 ```
 
-#### Explicación de cada comando
-
-**`uvicorn backend.main:app --port 8000 --reload`**
-
-| Parte | Explicación |
-|---|---|
-| `uvicorn` | Servidor ASGI. A diferencia de WSGI (Gunicorn, uWSGI), ASGI soporta asincronía nativa. Uvicorn usa `uvloop` (implementación de event loop en C basada en libuv) para máximo rendimiento |
-| `backend.main:app` | Importa el objeto `app` desde el módulo `backend.main.py`. La sintaxis es `ruta.al.archivo:nombre_del_objeto` |
-| `--port 8000` | Puerto TCP donde el servidor escucha conexiones HTTP |
-| `--reload` | Modo desarrollo: reinicia el servidor automáticamente cuando detecta cambios en archivos Python. Útil para desarrollo pero **debe omitirse en producción** por seguridad y rendimiento |
-
-**`npm run dev`**
-
-Ejecuta el script `dev` definido en `package.json`: `"dev": "vite"`. Vite inicia un servidor de desarrollo con las siguientes características:
-- **Hot Module Replacement (HMR)**: los cambios en archivos JSX/CSS se reflejan al instante sin recargar la página
-- **Servidor en `0.0.0.0:5173`**: configurado en `vite.config.js` con `host: '0.0.0.0'` para permitir acceso desde otros dispositivos en la red local
-- **Proxy automático**: no necesita proxy porque la comunicación con el backend se hace mediante HTTP directo desde `fetch()` (CORS se maneja en el Gateway)
-
 ### Orden de arranque recomendado
 
-1. **Backend** (debe estar listo antes que los demás porque Gateway y Payment Gateway intentarán conectar)
+1. **Backend Django** (debe estar listo primero)
 2. **Payment Gateway**
 3. **API Gateway** (depende de Backend y Payment Gateway)
 4. **Frontend** (depende del Gateway)
@@ -398,18 +360,18 @@ Ejecuta el script `dev` definido en `package.json`: `"dev": "vite"`. Vite inicia
    httpx POST http://localhost:7000/api/operaciones/conversion
    {usuario_id, monto_origen: 10000, moneda_origen: "ARS", monto_destino: 8.20, moneda_destino: "USD", tasa: 1220}
                 ↓
-6. API Gateway reenvía al Backend
+6. API Gateway reenvía al Backend Django
    httpx POST http://localhost:8000/api/operaciones/conversion
                 ↓
-7. Backend:
+7. Backend Django:
    a. Busca la cuenta ARS del usuario → verifica saldo ≥ 10000
    b. Busca (o crea) la cuenta USD del usuario
    c. Debita 10000 ARS, acredita 8.20 USD
    d. Inserta una Transferencia con moneda "ARS->USD"
-   e. Commit a SQLite
+   e. Guarda en SQLite
                 ↓
 8. La respuesta viaja de vuelta por la misma cadena:
-   Backend → Gateway → Payment Gateway → Gateway → Frontend
+   Django → Gateway → Payment Gateway → Gateway → Frontend
                 ↓
 9. Frontend muestra: "Compra exitosa. Recibiste $8.20 USD a una tasa de $1220 ARS/USD."
 ```
@@ -422,7 +384,7 @@ Ejecuta el script `dev` definido en `package.json`: `"dev": "vite"`. Vite inicia
 
 | Variable | Default | Descripción |
 |---|---|---|
-| `BACKEND_URL` | `http://localhost:8000` | URL del servicio Backend |
+| `BACKEND_URL` | `http://localhost:8000` | URL del Backend Django |
 | `PAYMENT_GATEWAY_URL` | `http://localhost:8001` | URL del Payment Gateway |
 | `CORS_ORIGINS` | `http://localhost:5173` | Orígenes CORS permitidos (separados por coma) |
 
@@ -432,12 +394,14 @@ Ejecuta el script `dev` definido en `package.json`: `"dev": "vite"`. Vite inicia
 |---|---|---|
 | `GATEWAY_URL` | `http://localhost:7000` | URL del API Gateway (por donde la pasarela envía operaciones al Backend) |
 
-### Backend (`backend/database/connection.py`, `backend/.env`)
+### Backend Django (`backend_django/config/settings.py`, `backend_django/.env`)
 
 | Variable | Default | Descripción |
 |---|---|---|
-| `DATABASE_PATH` | `backend/database.db` | Ruta del archivo SQLite |
-| `SMTP_HOST` | `smtp.gmail.com` | Servidor SMTP para envío de emails |
+| `DJANGO_SECRET_KEY` | `django-insecure-...` | Secret key de Django |
+| `DJANGO_DEBUG` | `True` | Modo debug |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:7000` | Orígenes CORS permitidos en Django |
+| `SMTP_HOST` | `smtp.gmail.com` | Servidor SMTP |
 | `SMTP_PORT` | `587` | Puerto SMTP |
 | `SMTP_USER` | — | Usuario SMTP |
 | `SMTP_PASSWORD` | — | Contraseña SMTP |
@@ -447,59 +411,52 @@ Ejecuta el script `dev` definido en `package.json`: `"dev": "vite"`. Vite inicia
 
 | Variable | Default | Descripción |
 |---|---|---|
-| `VITE_GATEWAY_URL` | `http://localhost:7000` | URL del API Gateway para todas las peticiones HTTP |
+| `VITE_GATEWAY_URL` | `http://localhost:7000` | URL del API Gateway |
 
 ---
 
 ## Ejecución distribuida en múltiples PCs
 
-Cada servicio puede ejecutarse en una máquina diferente gracias a la configuración por variables de entorno.
+Cada servicio puede ejecutarse en una máquina diferente mediante variables de entorno.
 
 ### Esquema de red típico
 
 | Servicio | PC | Puerto |
 |---|---|---|
-| Backend | PC1 (192.168.1.10) | 8000 |
+| Backend Django | PC1 (192.168.1.10) | 8000 |
 | Payment Gateway | PC2 (192.168.1.20) | 8001 |
 | API Gateway | PC3 (192.168.1.30) | 7000 |
 | Frontend | PC4 (192.168.1.40) | 5173 |
 
 ### Comandos distribuidos
 
-**PC1 — Backend**
+**PC1 — Backend Django**
 ```bash
-uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+cd backend_django
+python manage.py runserver 0.0.0.0:8000
 ```
 
 **PC2 — Payment Gateway**
 ```bash
-set GATEWAY_URL=http://192.168.1.30:7000
-uvicorn payment_gateway.main:app --host 0.0.0.0 --port 8001 --reload
+GATEWAY_URL=http://192.168.1.30:7000 uvicorn payment_gateway.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
 **PC3 — API Gateway**
 ```bash
-set BACKEND_URL=http://192.168.1.10:8000
-set PAYMENT_GATEWAY_URL=http://192.168.1.20:8001
-set CORS_ORIGINS=http://192.168.1.40:5173
+BACKEND_URL=http://192.168.1.10:8000 \
+PAYMENT_GATEWAY_URL=http://192.168.1.20:8001 \
+CORS_ORIGINS=http://192.168.1.40:5173 \
 uvicorn proxy.main:app --host 0.0.0.0 --port 7000 --reload
 ```
 
 **PC4 — Frontend**
 ```bash
 cd frontend
-set VITE_GATEWAY_URL=http://192.168.1.30:7000
-npm run dev
+VITE_GATEWAY_URL=http://192.168.1.30:7000 npm run dev
 ```
-
-### Comunicación entre servicios en la misma PC vs. diferentes PCs
-
-- Si dos servicios están en **la misma PC**, la URL puede ser `localhost` (evita overhead de red)
-- Si están en **PCs diferentes**, se usa la IP privada correspondiente
-- El flag `--host 0.0.0.0` en Uvicorn es necesario para que el servidor acepte conexiones desde **cualquier interfaz de red**, no solo `localhost`. Sin este flag, Uvicorn por defecto escucha solo en `127.0.0.1`, lo que impediría conexiones desde otras máquinas
 
 ### Consideraciones
 
-- **Firewall**: los puertos deben estar abiertos en cada PC (Windows Firewall o iptables)
-- **Red local**: las IPs privadas (192.168.x.x) solo funcionan dentro de la misma red. Para acceso desde internet se necesitaría un reverse proxy público (Nginx, Caddy) con SSL
+- **Firewall**: los puertos deben estar abiertos en cada PC
+- **Red local**: las IPs privadas solo funcionan dentro de la misma red
 - **Base de datos**: SQLite no soporta acceso concurrente desde múltiples procesos. Si el Backend se escala horizontalmente, debe migrarse a PostgreSQL o MySQL
