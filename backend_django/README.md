@@ -29,10 +29,10 @@ uv pip install -r requirements.txt
 python manage.py migrate
 
 # 5. Iniciar servidor
-python manage.py runserver 0.0.0.0:9000
+python manage.py runserver 0.0.0.0:8000
 ```
 
-El servidor se levanta en `http://localhost:9000`.
+El servidor se levanta en `http://localhost:8000`.
 
 ---
 
